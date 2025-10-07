@@ -1,19 +1,21 @@
 class TrainingData():
-    def __init__(self, file_path):
-        self.file_path = file_path
+    _cache = {}
 
-    def shakesphere(encoding='utf-8') -> str:
-        with open('data/shakesphere.txt', 'r', encoding=encoding) as f:
-            data = f.read()
-        return data
-    
-    def stories(encoding='utf-8') -> str:
-        with open('data/stories.txt', 'r', encoding=encoding) as f:
-            data = f.read()
-        return data
-    
-    def TinyStories(encoding='utf-8') -> str:
-        with open('data/TinyStories.txt', 'r', encoding=encoding) as f:
-            data = f.read()
-        return data
+    @classmethod
+    def _load_file(cls, filename, encoding='utf-8') -> str:
+        if filename not in cls._cache:
+            with open(filename, 'r', encoding=encoding) as f:
+                cls._cache[filename] = f.read()
+        return cls._cache[filename]
 
+    @classmethod
+    def shakesphere(cls, encoding='utf-8') -> str:
+        return cls._load_file('data/shakesphere.txt', encoding)
+
+    @classmethod
+    def stories(cls, encoding='utf-8') -> str:
+        return cls._load_file('data/stories.txt', encoding)
+
+    @classmethod
+    def TinyStories(cls, encoding='utf-8') -> str:
+        return cls._load_file('data/TinyStories.txt', encoding)
