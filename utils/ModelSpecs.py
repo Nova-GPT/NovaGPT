@@ -1,7 +1,7 @@
 from typing import Literal, ClassVar, Dict
 from pydantic import BaseModel, Field
 
-VariantName = Literal["toy", "tiny", "small", "target"]
+VariantName = Literal["toy", "tiny", "small", "mid", "target"]
 
 class ModelSpecs(BaseModel):
     VOCAB_SIZE: int # total number of tokens
@@ -15,7 +15,8 @@ class ModelSpecs(BaseModel):
         "toy": dict(VOCAB_SIZE=50261, BLOCK_SIZE=64, N_EMBD=128, N_HEAD=4, N_LAYER=3, DROPOUT=0.1),
         "tiny": dict(VOCAB_SIZE=50261, BLOCK_SIZE=128, N_EMBD=256, N_HEAD=6, N_LAYER=6, DROPOUT=0.15),
         "small": dict(VOCAB_SIZE=50261, BLOCK_SIZE=256, N_EMBD=384, N_HEAD=6, N_LAYER=6, DROPOUT=0.2), # andrej kerpathy model
-        "target": dict(VOCAB_SIZE=50261, BLOCK_SIZE=512, N_EMBD=512, N_HEAD=8, N_LAYER=8, DROPOUT=0.25),
+        "mid": dict(VOCAB_SIZE=50261, BLOCK_SIZE=512, N_EMBD=512, N_HEAD=8, N_LAYER=8, DROPOUT=0.25),
+        "target": dict(VOCAB_SIZE=50261, BLOCK_SIZE=512, N_EMBD=512, N_HEAD=12, N_LAYER=16, DROPOUT=0.30),
     }
 
     @classmethod
