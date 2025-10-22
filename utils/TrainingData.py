@@ -1,3 +1,5 @@
+
+
 class TrainingData():
     _cache = {}
 
@@ -18,4 +20,4 @@ class TrainingData():
 
     @classmethod
     def TinyStories(cls, encoding='utf-8') -> str:
-        return cls._load_file('data/TinyStories.txt', encoding)
+        return cls._load_file('data/TinyStories_part1.txt', encoding)
