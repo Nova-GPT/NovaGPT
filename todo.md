@@ -44,3 +44,9 @@
 (A) **Enable cuDNN / cuBLAS auto-tuning** : not very sure what or how it does it, but it speeds up things
 (A) **Gradient Accumilation Implimentation** : this will simulate a larger batch size without increasing the vram : simple to impliment also
 (A) **Use torch.utils.checkpoint** : Saves ~30–40% memory at the cost of ~15–20% slower compute
+
+(B) **Pause Training Feature** : Implimnet a way to pause training mid way just to analyse output or change something else, and later on resume when the work is done
+(B) **Implimentatoin of Moving Average Train/Val Loss** : In the training loop, other than min, max, and curr training loss, we should also print, a moving avg loss(also I thing we should remove the moving avg loss)
+(B) **Upgrade the Save and Load function** : save and load function should be robust, save with apt names, and upgraded to our current model, it should also be able to save the options chozen for the model in a viewable format, and one forlder for each model
+(C) **Understand all the Deepseek MLA things** : there are a lot of things implimented in the deepseek artictecture for mla, and not just simple mla, I need to understand each concept in detail.
+(C) **Integrate cProfiler and SnakeViz** : Speed profiler for python, github.com/Arush-Bansal/Mandelbrot-Set-Generator

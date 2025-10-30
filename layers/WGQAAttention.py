@@ -79,7 +79,10 @@ class WGQAAttention(nn.Module):
             attn_logits = attn_logits * logit_scale
 
         if attn_mask is not None:
-            attn_logits = attn_logits + attn_mask  # mask should be additive (-inf on disallowed)
+            if attn_mask.dtype == torch.bool:
+                attn_logits = attn_logits.masked_fill(~attn_mask, float('-inf'))
+            else:
+                attn_logits = attn_logits + attn_mask  # additive mask
 
         attn = F.softmax(attn_logits, dim=-1)
         attn = self.dropout(attn)

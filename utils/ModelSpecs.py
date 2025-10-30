@@ -16,10 +16,11 @@ class ModelSpecs(BaseModel):
         "toy": dict(VOCAB_SIZE=50261, BLOCK_SIZE=64, N_EMBD=128, N_HEAD=4, N_LAYER=3, DROPOUT=0.1, KV_HEADS=8),
         "tiny": dict(VOCAB_SIZE=50261, BLOCK_SIZE=128, N_EMBD=256, N_HEAD=6, N_LAYER=6, DROPOUT=0.15, KV_HEADS=8),
         "small": dict(VOCAB_SIZE=50261, BLOCK_SIZE=256, N_EMBD=384, N_HEAD=6, N_LAYER=6, DROPOUT=0.2, KV_HEADS=8), # andrej kerpathy model
+        # "mid": dict(VOCAB_SIZE=50261, BLOCK_SIZE=512, N_EMBD=512, N_HEAD=8, N_LAYER=8, DROPOUT=0.25, KV_HEADS=8),
         "mid": dict(VOCAB_SIZE=50261, BLOCK_SIZE=512, N_EMBD=512, N_HEAD=8, N_LAYER=8, DROPOUT=0.25, KV_HEADS=8),
         # "target": dict(VOCAB_SIZE=50261, BLOCK_SIZE=512, N_EMBD=512, N_HEAD=12, N_LAYER=16, DROPOUT=0.30, KV_HEADS=8),
         "target": dict(VOCAB_SIZE=50261, BLOCK_SIZE=512, N_EMBD=516, N_HEAD=12, N_LAYER=16, DROPOUT=0.30, KV_HEADS=8),
-        # "dream": dict(VOCAB_SIZE=50261, BLOCK_SIZE=1024, N_EMBD=512, N_HEAD=12, N_LAYER=16, DROPOUT=0.30, KV_HEADS=8),
+        "dream": dict(VOCAB_SIZE=50261, BLOCK_SIZE=1024, N_EMBD=516, N_HEAD=12, N_LAYER=16, DROPOUT=0.30, KV_HEADS=8),
     }
     # NOTE for our target, we can experiment with the embedding size to be till 768 also
     # KV_HEADS is a parameter specific to W-GQA, and 4 and 8 heads represent various performance tradeoffs, prefer 8 for now.

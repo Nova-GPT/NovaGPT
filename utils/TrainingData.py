@@ -18,6 +18,10 @@ class TrainingData():
     def stories(cls, encoding='utf-8') -> str:
         return cls._load_file('data/stories.txt', encoding)
 
+    # @classmethod
+    # def TinyStories(cls, encoding='utf-8') -> str:
+    #     return cls._load_file('data/TinyStories_part1.txt', encoding)
+    
     @classmethod
     def TinyStories(cls, encoding='utf-8') -> str:
-        return cls._load_file('data/TinyStories_part1.txt', encoding)
+        return cls._load_file('data/TinyStories.txt', encoding)

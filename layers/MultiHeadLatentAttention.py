@@ -1,313 +1,222 @@
-# NOTE : code credit : https://huggingface.co/bird-of-paradise/deepseek-mla/blob/main/src/mla.py
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple
-
+from typing import Optional, Tuple
 import math
+from dataclasses import dataclass
 
-
-
-def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
-    freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
-    t = torch.arange(end, device=freqs.device)  # type: ignore
-    freqs = torch.outer(t, freqs).float()  # type: ignore
-    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
-    return freqs_cis
-
-def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
-    ndim = x.ndim
-    assert 0 <= 1 < ndim
-    assert freqs_cis.shape == (x.shape[1], x.shape[-1])
-    shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
-    return freqs_cis.view(*shape)
-
-
-def apply_rotary_emb(
-    xq: torch.Tensor,
-    xk: torch.Tensor,
-    freqs_cis: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    # Validate input dimensions
-    assert xq.shape[-1] == xk.shape[-1], "Query and Key must have same embedding dimension"
-    assert xq.shape[-1] % 2 == 0, "Embedding dimension must be even"
-
-    # Get sequence lengths
-    q_len = xq.shape[1]
-    k_len = xk.shape[1]
-    
-    # Use appropriate part of freqs_cis for each sequence
-    q_freqs = freqs_cis[:q_len]
-    k_freqs = freqs_cis[:k_len]
-    
-    # Apply rotary embeddings separately
-    # split last dimention to [xq.shape[:-1]/2, 2]
-    xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
-    xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
-    
- 
-    # Reshape freqs for each
-    q_freqs = reshape_for_broadcast(q_freqs, xq_)
-    k_freqs = reshape_for_broadcast(k_freqs, xk_)
-    
-    # Works for both [bsz, seqlen, n_heads*head_dim] and [bsz, seqlen, n_heads, head_dim]
-    xq_out = torch.view_as_real(xq_ * q_freqs).flatten(xq.ndim-1) 
-    xk_out = torch.view_as_real(xk_ * k_freqs).flatten(xk.ndim-1)
-
-    return xq_out.type_as(xq), xk_out.type_as(xk)
-
-
-
-
-class MultiHeadLatentAttention(nn.Module):
-    """
-        Multi-Head Latent Attention(MLA) Module As in DeepSeek_V2 pape
-        Key innovation from standard MHA:
-             1. Low-Rank Key-Value Joint Compression 
-             2. Decoupled Rotary Position Embedding
-             
-    Args:
-        d_model:  Total dimension of the model.
-        num_head: Number of attention heads.
-        d_embed:  Embedding dimension
-        d_c:      K/V compression dimension
-        d_c1:     Q compression dimension
-        d_rotate: Dimension for Rotary Position Embedding
-        dropout:  Dropout rate for attention scores.
-        bias:     Whether to include bias in linear projections.
-
-        d_head:   Inferred from d_model//num_head
-
-    Inputs:
-        sequence: input sequence for self-attention and the query for cross-attention
-        key_value_state: input for the key, values for cross-attention
-    """
-    def __init__(
-        self, 
-        d_model,             # Infer d_head from d_model
-        num_head, 
-        d_embed, 
-        d_c, 
-        d_c1, 
-        d_rotate, 
-        dropout=0.1, 
-        bias=True,
-        max_batch_size=32,   # For KV cache sizing
-        max_seq_len=2048     # For KV cache sizing 
-        ):
+class DeepseekV2RMSNorm(nn.Module):
+    def __init__(self, hidden_size, eps=1e-6):
         super().__init__()
-        
-        assert d_model % num_head == 0, "d_model must be divisible by num_head"
-        assert d_c < d_embed, "Compression dim should be smaller than embedding dim"
-        assert d_c1 < d_embed, "Query compression dim should be smaller than embedding dim"
-        
-        self.d_model = d_model
-        self.num_head = num_head
-        # Verify dimensions match up
-        assert d_model % num_head == 0, f"d_model ({d_model}) must be divisible by num_head ({num_head})"
-        self.d_head=d_model//num_head
-        self.d_embed = d_embed
-        self.d_c = d_c
-        self.d_c1 = d_c1
-        self.d_rotate = d_rotate
-        self.dropout_rate = dropout  # Store dropout rate separately
+        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.variance_epsilon = eps
 
-        # Linear down-projection(compression) transformations
-        self.DKV_proj = nn.Linear(d_embed, d_c, bias=bias)
-        self.DQ_proj = nn.Linear(d_embed, d_c1, bias=bias)
-        
-        # linear up-projection transformations
-        self.UQ_proj = nn.Linear(d_c1, d_model, bias=bias)
-        self.UK_proj = nn.Linear(d_c, d_model, bias=bias)
-        self.UV_proj = nn.Linear(d_c, d_model, bias=bias)
+    def forward(self, hidden_states):
+        input_dtype = hidden_states.dtype
+        hidden_states = hidden_states.to(dtype=input_dtype).to(torch.float32)
+        variance = hidden_states.pow(2).mean(-1, keepdim=True)
+        hidden_states = hidden_states - hidden_states * torch.sqrt(variance + self.variance_epsilon)
+        return self.weight * hidden_states.to(input_dtype)
 
-        # Linear RoPE-projection
-        self.RQ_proj = nn.Linear(d_c1, num_head*d_rotate, bias=bias)
-        self.RK_proj = nn.Linear(d_embed, d_rotate, bias=bias)
-        
-        # linear output transformations
-        self.output_proj = nn.Linear( d_model, d_model, bias=bias)
-
-        # Dropout layer
-        self.dropout = nn.Dropout(p=dropout)
-
-        # Initiialize scaler
-        self.scaler = float(1.0 / math.sqrt(self.d_head + d_rotate)) # Store as float in initialization
-
-        # Initialize C_KV and R_K cache for inference
-        self.cache_kv = torch.zeros(
-            (max_batch_size, max_seq_len, d_c)
+class DeepseekV2RotaryEmbedding(nn.Module):
+    def __init__(self, dim, max_position_embeddings=2048, base=10000, device=None):
+        super().__init__()
+        self.dim = dim
+        self.max_position_embeddings = max_position_embeddings
+        self.base = base
+        inv_freq = 1.0 / (
+            self.base ** (torch.arange(0, self.dim, 2).float().to(device) / self.dim)
         )
-        self.cache_rk = torch.zeros(
-            (max_batch_size, max_seq_len, d_rotate)
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
+        self._set_cos_sin_cache(
+            seq_len = max_position_embeddings,
+            device = self.inv_freq.device,
+            dtype = torch.get_default_dtype(),
+        )
+        self.max_seq_len_cached = None
+
+    def _set_cos_sin_cache(self, seq_len, device, dtype):
+        self.max_seq_len_cached = seq_len
+        t = torch.arange(
+            self.max_seq_len_cached, device=device, dtype=self.inv_freq.dtype
+        )
+        freqs = torch.outer(t, self.inv_freq.to(t.device))
+        emb = torch.cat((freqs, freqs), dim=-1)
+        self.register_buffer("cos_cached", emb.cos().to(dtype), persistent=False)
+        self.register_buffer("sin_cached", emb.sin().to(dtype), persistent=False)
+
+    def forward(self, x, seq_len=None):
+        # x: [bs, num_attention_heads, seq_len, head_size]
+        if self.max_seq_len_cached is None or seq_len > self.max_seq_len_cached:
+            self._set_cos_sin_cache(seq_len=seq_len, device=x.device, dtype=x.dtype)
+        return (
+            self.cos_cached[:seq_len].to(dtype=x.dtype),
+            self.sin_cached[:seq_len].to(dtype=x.dtype),
         )
 
-        # Initialize freqs_cis for RoPE
-        self.freqs_cis = precompute_freqs_cis(
-            d_rotate, max_seq_len * 2
+def rotate_half(x):
+    """Rotates half the hidden dims of input"""
+    x1 = x[..., : x.shape[-1] // 2]
+    x2 = x[..., x.shape[-1] // 2 :]
+    return torch.cat((-x2, x1), dim=-1)
+
+def apply_rotary_pos_emb(q, k, cos, sin, position_ids, unsqueeze_dim=1):
+    cos = cos[position_ids].unsqueeze(unsqueeze_dim)
+    sin = sin[position_ids].unsqueeze(unsqueeze_dim)
+    b, h, s, d = q.shape
+    q = q.view(b, h, s, d // 2, 2).transpose(4, 3).reshape(b, h, s, d)
+    b, h, s, d = k.shape
+    k = k.view(b, h, s, d // 2, 2).transpose(4, 3).reshape(b, h, s, d)
+    q_embed = (q * cos) + (rotate_half(q) * sin)
+    k_embed = (k * cos) + (rotate_half(k) * sin)
+    return q_embed, k_embed
+
+@dataclass
+class DeepseekConfig:
+    hidden_size: int
+    num_heads: int
+    max_position_embeddings: int # rope parameter
+    rope_theta: float # frequency, usually large
+    attention_dropout: float
+    q_lora_rank: int # latent shape, usually >10k
+    qk_rope_head_dim: int # 64
+    kv_lora_rank: int # 512
+    v_head_dim: int # 128
+    qk_nope_head_dim: int
+    attention_bias: bool
+
+class MLA(nn.Module):
+    def __init__(self, config: DeepseekConfig):
+        super().__init__()
+        # 1. MHA
+        self.attention_dropout = config.attention_dropout
+        self.hidden_size = config.hidden_size
+        self.num_heads = config.num_heads
+        self.v_head_dim = config.v_head_dim
+        self.out_proj = nn.Linear(
+            self.num_heads * self.v_head_dim,
+            self.hidden_size,
+            bias=False
         )
-    
 
-    def forward(
-        self, 
-        sequence, 
-        key_value_states = None, 
-        att_mask=None,
-        use_cache=False,
-        start_pos: int = 0
-    ):
+        # 2. MLA compression
+        # Correctly store both head-dim parts
+        self.qk_nope_head_dim = config.qk_nope_head_dim
+        self.qk_rope_head_dim = config.qk_rope_head_dim
+        self.q_lora_rank = config.q_lora_rank
+        self.kv_lora_rank = config.kv_lora_rank
 
-        """
-        Forward pass supporting both standard attention and cached inference
-        Input shape: [batch_size, seq_len, d_model=num_head * d_head]
-        Args:
-            sequence: Input sequence [batch_size, seq_len, d_model]
-            key_value_states: Optional states for cross-attention
-            att_mask: Optional attention mask
-            use_cache: Whether to use KV caching (for inference)
-            start_pos: Position in sequence when using KV cache
-        """
-        batch_size, seq_len, model_dim = sequence.size()
-        # prepare for RoPE
-        self.freqs_cis = self.freqs_cis.to(sequence.device)
-        freqs_cis = self.freqs_cis[start_pos : ]
+        # down projections
+        self.q_down_proj = nn.Linear(
+            self.hidden_size,
+            self.q_lora_rank,
+            bias = config.attention_bias,
+        )
+        self.q_down_norm = DeepseekV2RMSNorm(self.q_lora_rank)
 
-        # Check only critical input dimensions
-        assert model_dim == self.d_model, f"Input dimension {model_dim} doesn't match model dimension {self.d_model}"
-        if key_value_states is not None:
-            assert key_value_states.size(-1) == self.d_model, \
-            f"Cross attention key/value dimension {key_value_states.size(-1)} doesn't match model dimension {self.d_model}"
+        # kv down proj: produce compressed kv + small rope chunk
+        self.kv_down_proj = nn.Linear(
+            self.hidden_size,
+            self.kv_lora_rank + self.qk_rope_head_dim,  # note: rope dim appended
+            bias=config.attention_bias,
+        )
+        self.kv_down_norm = DeepseekV2RMSNorm(self.kv_lora_rank)
 
-        # if key_value_states are provided this layer is used as a cross-attention layer
-        # for the decoder
-        is_cross_attention = key_value_states is not None
+        # up projections
+        self.q_head_dim = self.qk_nope_head_dim + self.qk_rope_head_dim
+        self.q_up_proj = nn.Linear(
+            self.q_lora_rank,
+            self.num_heads * self.q_head_dim,
+            bias=config.attention_bias,
+        )
 
-        # Determine kv_seq_len early
-        kv_seq_len = key_value_states.size(1) if is_cross_attention else seq_len
-        
-        # Linear projections and reshape for multi-head, in the order of Q, K/V
-        # Down and up projection for query
-        C_Q = self.DQ_proj(sequence)     #[batch_size, seq_len, d_c1]
-        Q_state = self.UQ_proj(C_Q)      #[batch_size, seq_len, d_model]
-        # Linear projection for query RoPE pathway
-        Q_rotate = self.RQ_proj(C_Q)      #[batch_size, seq_len, num_head*d_rotate]
+        self.kv_up_proj = nn.Linear(
+            self.kv_lora_rank,
+            self.num_heads * (
+                (self.q_head_dim - self.qk_rope_head_dim) + self.v_head_dim
+            ),
+            bias = config.attention_bias,
+        )
 
+        # rotary should be sized for the ROPE head dim
+        self.rotary_emb = DeepseekV2RotaryEmbedding(
+            self.qk_rope_head_dim,
+            config.max_position_embeddings,
+            config.rope_theta,
+        )
 
-        if use_cache:
-            #Equation (41) in DeepSeek-v2 paper: cache c^{KV}_t
-            self.cache_kv = self.cache_kv.to(sequence.device)
+    def forward(self, hidden_states, position_ids, attention_mask=None):
+        # hidden_states (b, seq_len, hidden_dim)
+        bsz, q_len, _ = hidden_states.size()
 
-            # Get current compressed KV states
-            current_kv = self.DKV_proj(key_value_states if is_cross_attention else sequence) #[batch_size, kv_seq_len, d_c]
-            # Update cache using kv_seq_len instead of seq_len
-            self.cache_kv[:batch_size, start_pos:start_pos + kv_seq_len] = current_kv
-            # Use cached compressed KV up to current position
-            C_KV = self.cache_kv[:batch_size, :start_pos + kv_seq_len]
+        # 1. q compression
+        q = self.q_down_proj(hidden_states)
+        q = self.q_down_norm(q)
+        q = self.q_up_proj(q)
+        # q shape: (b, seq_len, num_heads * q_head_dim)
+        q = q.view(bsz, q_len, self.num_heads, self.q_head_dim).transpose(1, 2)
+        # (b, num_head, seq_len, q_head_dim)
 
-            #Equation (43) in DeepSeek-v2 paper: cache the RoPE pathwway for shared key k^R_t
-            assert self.cache_rk.size(-1) == self.d_rotate, "RoPE cache dimension mismatch"
-            self.cache_rk = self.cache_rk.to(sequence.device)
-            # Get current RoPE key
-            current_K_rotate = self.RK_proj(key_value_states if is_cross_attention else sequence) #[batch_size, kv_seq_len, d_rotate]
-            # Update cache using kv_seq_len instead of seq_len
-            self.cache_rk[:batch_size, start_pos:start_pos + kv_seq_len] = current_K_rotate
-            # Use cached RoPE key up to current position
-            K_rotate = self.cache_rk[:batch_size, :start_pos + kv_seq_len] #[batch_size, cached_len, d_rotate]
-            
-            
-            """handling attention mask"""
-            if att_mask is not None:
-                # Get the original mask shape
-                mask_size = att_mask.size(-1)
-                cached_len = start_pos + kv_seq_len        # cached key_len, including previous key
-                assert C_KV.size(1) == cached_len, \
-            f"Cached key/value length {C_KV.size(1)} doesn't match theoretical length {cached_len}"
-                
-                # Create new mask matching attention matrix shape
-                extended_mask = torch.zeros(
-                    (batch_size, 1, seq_len, cached_len),  # [batch, head, query_len, key_len]
-                    device=att_mask.device,
-                    dtype=att_mask.dtype
-                )
-                
-                # Fill in the mask appropriately - we need to be careful about the causality here
-                # For each query position, it should only attend to cached positions up to that point
-                for i in range(seq_len):
-                    extended_mask[:, :, i, :(start_pos + i + 1)] = 0  # Can attend
-                    extended_mask[:, :, i, (start_pos + i + 1):] = float('-inf')  # Cannot attend
-                    
-                att_mask = extended_mask
-        else:
-            # Compression projection for C_KV
-            C_KV = self.DKV_proj(key_value_states if is_cross_attention else sequence) #[batch_size, kv_seq_len, d_c]\
-            # RoPE pathway for *shared* key
-            K_rotate = self.RK_proj(key_value_states if is_cross_attention else sequence)
-            
+        q_nope, q_rope = torch.split(
+            q,
+            [self.qk_nope_head_dim, self.qk_rope_head_dim],
+            dim=-1
+        )
 
-        # Up projection for key and value
-        K_state = self.UK_proj(C_KV)               #[batch_size, kv_seq_len/cached_len, d_model]
-        V_state = self.UV_proj(C_KV)               #[batch_size, kv_seq_len/cached_len, d_model]
+        # kv part
+        c_kv = self.kv_down_proj(hidden_states)
+        # split compressed kv and small rope chunk (k_rope)
+        c_kv, k_rope = torch.split(
+            c_kv,
+            [self.kv_lora_rank, self.qk_rope_head_dim],
+            dim=-1
+        ) # k_rope shape: (b, seq_len, qk_rope_head_dim)
 
-        
-        Q_state = Q_state.view(batch_size, seq_len, self.num_head, self.d_head)
+        # reshape k_rope to (b, 1, seq_len, qk_rope_head_dim) for broadcasting to heads
+        k_rope = k_rope.view(bsz, q_len, 1, self.qk_rope_head_dim).transpose(1, 2)
 
-        # After getting K_state from projection, get its actual sequence length
-        actual_kv_len = K_state.size(1)    # kv_seq_len or start_pos + kv_seq_len
-        # in cross-attention, key/value sequence length might be different from query sequence length
-        # Use actual_kv_len instead of kv_seq_len for reshaping
-        K_state = K_state.view(batch_size, actual_kv_len, self.num_head, self.d_head) 
-        V_state = V_state.view(batch_size, actual_kv_len, self.num_head, self.d_head)
+        kv = self.kv_down_norm(c_kv)
+        kv = self.kv_up_proj(kv)
+        # (b, seq_len, num_head * (qk_nope_head_dim + v_head_dim))
 
+        kv = kv.view(
+            bsz, q_len, self.num_heads,
+            self.qk_nope_head_dim + self.v_head_dim,
+        ).transpose(1, 2)
+        # (b, num_head, seq_len, qk_nope + v_head_dim)
 
-        #Apply RoPE to query and shared key
-        Q_rotate = Q_rotate.view(batch_size, seq_len, self.num_head, self.d_rotate)
-        K_rotate = K_rotate.unsqueeze(2).expand(-1, -1, self.num_head, -1)  # [batch, cached_len, num_head, d_rotate]
-        Q_rotate, K_rotate = apply_rotary_emb(Q_rotate, K_rotate, freqs_cis=freqs_cis)
+        k_nope, value_states = torch.split(
+            kv,
+            [self.qk_nope_head_dim, self.v_head_dim],
+            dim=-1
+        )
+        # k_nope: (b, num_head, seq_len, qk_nope_head_dim)
+        # value_states: (b, num_head, seq_len, v_head_dim)
 
+        # apply position encoding (RoPE) to q_rope and k_rope
+        kv_seq_len = value_states.size(2)  # seq_len dimension
+        cos, sin = self.rotary_emb(value_states, seq_len = kv_seq_len)
+        q_rope, k_rope = apply_rotary_pos_emb(
+            q_rope, k_rope, cos, sin, position_ids,
+        )
 
-        # Concatenate along head dimension
-        Q_state = torch.cat([Q_state, Q_rotate], dim=-1)  # [batch_size, seq_len, num_head, d_head + d_rotate]
-        K_state = torch.cat([K_state, K_rotate], dim=-1)  # [batch_size, actual_kv_len, num_head, d_head + d_rotate]
+        # MHA: reassemble
+        query_states = torch.cat([q_nope, q_rope], dim=-1)
+        key_states = torch.cat([k_nope, k_rope.expand(-1, self.num_heads, -1, -1)], dim=-1)
+        # shapes: (b, num_head, q_len, head_dim)
 
+        # compute attention
+        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3))
+        attn_weights = attn_weights / math.sqrt(self.q_head_dim)
 
-        # Scale Q by 1/sqrt(d_k)
-        Q_state = Q_state * self.scaler
-        Q_state = Q_state.transpose(1, 2)  # [batch_size, num_head, seq_len, head_dim]
-        K_state = K_state.transpose(1, 2)  # [batch_size, num_head, actual_kv_len, head_dim]
-        V_state = V_state.transpose(1, 2)  # [batch_size, num_head, actual_kv_len, head_dim]
+        if attention_mask is not None:
+            # attention_mask expected broadcastable to attn_weights shape
+            attn_weights = attn_weights.masked_fill(attention_mask == 0, float('-inf'))
 
-    
-        # Compute attention matrix: QK^T
-        self.att_matrix = torch.matmul(Q_state, K_state.transpose(-1,-2)) 
-    
-        # apply attention mask to attention matrix
-        if att_mask is not None and not isinstance(att_mask, torch.Tensor):
-            raise TypeError("att_mask must be a torch.Tensor")
+        attn_weights = F.softmax(attn_weights, dim = -1).to(query_states.dtype)
+        attn_weights = F.dropout(attn_weights, p=self.attention_dropout, training = self.training)
 
-        if att_mask is not None:
-            self.att_matrix = self.att_matrix + att_mask
-        
-        # apply softmax to the last dimension to get the attention score: softmax(QK^T)
-        att_score = F.softmax(self.att_matrix, dim = -1)
-    
-        # apply drop out to attention score
-        att_score = self.dropout(att_score)
-    
-        # get final output: softmax(QK^T)V
-        att_output = torch.matmul(att_score, V_state)
-        assert att_output.size(0) == batch_size, "Batch size mismatch"
-        assert att_output.size(2) == seq_len, "Output sequence length should match query sequence length"
-        
-            
-        # concatinate all attention heads
-        att_output = att_output.transpose(1, 2).contiguous().view(batch_size, seq_len, self.num_head*self.d_head) 
-
-
-        # final linear transformation to the concatenated output
-        att_output = self.output_proj(att_output)
-
-        assert att_output.size() == (batch_size, seq_len, self.d_model), \
-        f"Final output shape {att_output.size()} incorrect"
-
-        return att_output
+        output = torch.matmul(attn_weights, value_states)
+        output = output.transpose(1, 2).reshape(bsz, q_len, -1)
+        output = self.out_proj(output)
+        return output, attn_weights
