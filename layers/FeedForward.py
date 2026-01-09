@@ -2,18 +2,18 @@ from torch import nn
 import torch
 
 from utils import ModelSpecs
+from layers.SwiGLU import SwiGLU
 
-class FeedFoward(nn.Module):
+class FeedForward(nn.Module):
     """ a simple linear layer followed by a non-linearity 
       Linear -> ReLU -> Linear -> Dropout"""
 
     def __init__(self, specs : ModelSpecs):
         super().__init__()
         n_embd = specs.N_EMBD
+        d_ffn = int(2.67 * n_embd)  # Reduced ratio for SwiGLU, can tune as needed
         self.net = nn.Sequential(
-            nn.Linear(n_embd, 4 * n_embd),
-            nn.ReLU(),
-            nn.Linear(4 * n_embd, n_embd),
+            SwiGLU(n_embd, d_ffn),
             nn.Dropout(specs.DROPOUT),
         )
 

@@ -1,7 +1,8 @@
 import torch
 from torch import nn
 
-from layers.FeedForward import FeedFoward
+from layers.FeedForward import FeedForward
+# from layers.FeedForwardXformers import FeedForwardSwiGLU
 from layers.MultiHeadAttention import MultiHeadAttention
 from utils import ModelSpecs
 
@@ -17,7 +18,8 @@ class Block(nn.Module):
         head_size = n_embd // n_head
 
         self.sa = MultiHeadAttention(n_head, head_size, specs, use_mla=use_mla)
-        self.ffwd = FeedFoward(specs)
+        # self.ffwd = FeedForwardSwiGLU(specs)
+        self.ffwd = FeedForward(specs)
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
 

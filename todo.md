@@ -1,10 +1,11 @@
-(B) #RND Explore concept of **Progressive Context Increment** {cr:2025-10-20} +TrainingOptimization
+(D) #RND Explore concept of **Progressive Context Increment** {cr:2025-10-20} +TrainingOptimization
   Start with block size 64 → 128 → 256 → ... for more efficient training.
 
 (B) #RND – Explore the **paper reducing training time from quadratic to linear** {cr:2025-10-20} +Efficiency
 
-(C) #RND – Explore various **DeepSeek innovations**  🔗 https://medium.com/@jannadikhemais/the-engineering-innovations-behind-deepseek-how-a-chinese-startup-redefined-ai-efficiency-90ea30788829   {cr:2025-10-20} +DeepSeek {c}
-  (C) Arush – Read about **RL in DeepSeek** {cr:2025-10-20} +Reading
+(D) #RND – Explore various **DeepSeek innovations**  🔗 https://medium.com/@jannadikhemais/the-engineering-innovations-behind-deepseek-how-a-chinese-startup-redefined-ai-efficiency-90ea30788829   {cr:2025-10-20} +DeepSeek {c}
+
+(C) Arush – Read about **RL in DeepSeek** {cr:2025-10-20} +Reading
 
 (C) #RND – Understand **tricks used in SmolLM 1 → 3** {cr:2025-10-20} +SmolLM 
 
@@ -14,19 +15,19 @@
   Count occurrences of each token in DB 
   Display histogram of vocab coverage
 
-(A) **LORA like approximating initial step** : instead of directly training a ab layer, first train a2 * 2b layer first then jump upto a * b layer #RND #Arush +ProgressiveTrainingStratagy
-(B) **Experiment with ideal Vocab size** 50000 is an overkill #RND #Arush
+(C) **LORA like approximating initial step** : instead of directly training a ab layer, first train a2 * 2b layer first then jump upto a * b layer #RND #Arush +ProgressiveTrainingStratagy
+(A) **Experiment with ideal Vocab size** 50000 is an overkill #RND #Arush
 (C) **Compare MLA vs WGQA-4 vs WGQA-8** - understand the various tradeoffs
 (C) **Impliment Dynamic Cosine Learning Rate Schedule** - Found this in Karpathy Video
 
-(A) **Implimentation of Flash Attention Kernals(v2)** : will speedup the attention part
-(A) **Enable cuDNN / cuBLAS auto-tuning** : not very sure what or how it does it, but it speeds up things
-(A) **Gradient Accumilation Implimentation** : this will simulate a larger batch size without increasing the vram : simple to impliment also
+(D) **Implimentation of Flash Attention Kernals(v2)** : will speedup the attention part
+(C) **Enable cuDNN / cuBLAS auto-tuning** : not very sure what or how it does it, but it speeds up things
+# (A) **Gradient Accumilation Implimentation** : this will simulate a larger batch size without increasing the vram : simple to impliment also
 (E) **Use torch.utils.checkpoint** : Saves ~30–40% memory at the cost of ~15–20% slower compute : used when training large llm
 
-(B) **Pause Training Feature** : Implimnet a way to pause training mid way just to analyse output or change something else, and later on resume when the work is done
-(B) **Implimentatoin of Moving Average Train/Val Loss** : In the training loop, other than min, max, and curr training loss, we should also print, a moving avg loss(also I thing we should remove the moving avg loss)
-(B) **Upgrade the Save and Load function** : save and load function should be robust, save with apt names, and upgraded to our current model, it should also be able to save the options chozen for the model in a viewable format, and one forlder for each model
+(A) **Pause Training Feature** : Implimnet a way to pause training mid way just to analyse output or change something else, and later on resume when the work is done
+(A) **Implimentatoin of Moving Average Train/Val Loss** : In the training loop, other than min, max, and curr training loss, we should also print, a moving avg loss(also I thing we should remove the moving avg loss)
+(A) **Upgrade the Save and Load function** : save and load function should be robust, save with apt names, and upgraded to our current model, it should also be able to save the options chozen for the model in a viewable format, and one forlder for each model
 (C) **Understand all the Deepseek MLA things** : there are a lot of things implimented in the deepseek artictecture for mla, and not just simple mla, I need to understand each concept in detail.
 (C) **Batch size investigation** : Investigate why decreasing the batch size sometime decreases the overall training time.
 
@@ -41,3 +42,16 @@
 (D) **Read Samsung TRM paper** : Tiny Recursive 7Billion parameter model focusing on speciallized use cases
 
 (B) **Impliment Profiling** : Try out torch profiling, will be of great help later on, to understand where is my gpu usage and time are going exactly
+
+(B) **RmsNorm vs LayerNorm** : RmsNorm seems to decrease the time required, compare if I should use RmsNorm or LayerNorm
+(A) **Try out Xformers** : can allow for speed boost, try using in the feed forward layer
+
+(A) **Impliment Benchmarking** : Time to otpimize your model for a benchmark
+
+(C) **MOE style for different parts** : Like what if we impliment moe for attention etc, because not all attention is useful #Architecture (maybe this stuff is not useful for bigger models, but in 100M paramters we need more attention blocks so we should use it)
+
+(D) **Lower Quality Data Remover** : Not sure how to impliment this, but since we have a training constraint, its beinfitial if we are able to somehow remove useless tokens
+
+(C) **Read about 1 bit llms** : this is a natural progression of all ai models, so probably here to
+
+(D) **Idea** Merged embeddings, as it turns out, embeddings and their modification is what these models can do. what if I am able to merge these embeddings of different models and their capabilites for being able to do different tasks. Gemma is releasing a series of models to solve different types of problems, what if we are able to merge them, like not a single embedding, but one problem, different embedings just a way for those embeddings to communicate between each others.
